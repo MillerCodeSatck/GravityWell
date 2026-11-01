@@ -1,0 +1,35 @@
+# 编译产物
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.lib
+*.so
+*.dylib
+
+# CMake 构建目录
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# 调试/符号文件
+*.pdb
+*.ilk
+*.gch
+*.pch
+
+# 编辑器 / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 日志
+*.log
