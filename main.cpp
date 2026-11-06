@@ -14,6 +14,14 @@ struct Planet
     Color color;  // 颜色
 };
 
+// 核心类
+struct Core
+{
+    Vector2 pos;
+    float size;
+    bool iscollect;
+};
+
 // 飞船类
 struct Ship
 {
@@ -30,9 +38,16 @@ const float R_MIN = 100.0f; // 防止引力爆炸的最小距离
 const float V_MAX = 400.0f;
 const float FUEL_MAX = 100.0f;
 const float FIXED_DT = 1.0f / 120.0f;
-const float FUEL_LOW_OF_TICK = 0.3f;
+const float FUEL_LOW_OF_TICK = 0.2f;
 
-Planet *nearestplanet(const Ship &ship, vector<Planet> &planets)
+// makeshipdie：标记飞船死亡，主循环检测到 life=false 会退出
+void makeshipdie(Ship &ship)
+{
+    ship.life = false;
+}
+
+// 找离飞船最近的星球
+Planet *findnearestplanet(const Ship &ship, vector<Planet> &planets)
 {
     Planet *nearest = nullptr;
     float bestD2 = 1e18f;
@@ -49,19 +64,83 @@ Planet *nearestplanet(const Ship &ship, vector<Planet> &planets)
     return nearest;
 }
 
+// 找离飞船最近的核心
+Core *findnearestcore(const Ship &ship, vector<Core> &cores)
+{
+    Core *nearest = nullptr;
+    float bestD2 = 1e18f;
+    for (auto &c : cores)
+    {
+        float dx = c.pos.x - ship.pos.x, dy = c.pos.y - ship.pos.y;
+        float d2 = dx * dx + dy * dy;
+        if (d2 < bestD2 && !c.iscollect)
+        {
+            bestD2 = d2;
+            nearest = &c;
+        }
+    }
+    return nearest;
+}
+
 inline float dist(float dx, float dy) { return sqrt(dx * dx + dy * dy); }
 
-void makeshipdie(Ship& ship);
-float adding=0.0f;
+// ================= 核心渲染函数 =================
+// 绘制一帧：星球、能量核心、引力圈/线、飞船、油量条、核心进度
+void RenderGame(const Ship &ship, const vector<Planet> &planets,
+                const vector<Core> &cores, const Planet *nearest)
+{
+    ClearBackground({10, 10, 25, 255});
+
+    // 1. 星球
+    for (const auto &p : planets)
+        DrawCircleV(p.pos, p.radius, p.color);
+
+    // 2. 能量核心（未收集画光晕+实心，已收集跳过）
+    for (const auto &c : cores)
+    {
+        if (c.iscollect)
+            continue;
+        DrawCircleLinesV(c.pos, c.size + 4, Fade(GOLD, 0.5f));
+        DrawCircleV(c.pos, c.size, GOLD);
+    }
+
+    // 3. 引力圈 + 引力线（按住左键且仍有燃料时）
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && ship.fuel > 0 && nearest)
+    {
+        DrawCircleLinesV(nearest->pos, nearest->radius + 8, GREEN);
+        DrawLineV(ship.pos, nearest->pos, Fade(GREEN, 0.3f));
+    }
+
+    // 4. 飞船
+    DrawCircleLinesV(ship.pos, ship.radius, ship.color);
+
+    // 5. 油量条
+    DrawRectangle(10, 10, 200, 14, DARKGRAY);
+    DrawRectangle(10, 10, (int)(200 * ship.fuel / FUEL_MAX), 14, ORANGE);
+
+    // 6. 核心收集进度
+    int total = (int)cores.size(), collected = 0;
+    for (const auto &c : cores)
+        if (c.iscollect)
+            collected++;
+    DrawText(TextFormat("Core %d / %d", collected, total), 10, 30, 20, LIGHTGRAY);
+}
+// =================================================
+
+float adding = 0.0f;
 int main()
 {
     InitWindow(1200, 1000, "Gravity-Well 引力井");
     SetTargetFPS(120);
-    Ship ship = {{50, 50}, {0, 0}, FUEL_MAX, true}; // 飞船实例
-    vector<Planet> planets = {                      // 星球实例
+    Ship ship = {{50, 50}, {10, 10}, FUEL_MAX, true}; // 飞船实例
+    vector<Planet> planets = {                        // 星球实例
                               {{300, 400}, 1.0f, 50.0f, GRAY},
-                              {{400, 200}, 1.3f, 50.6f, GREEN},
+                              {{500, 150}, 1.3f, 50.6f, GREEN},
                               {{900, 500}, 0.79f, 48.5f, ORANGE}};
+    vector<Core> cores = {// 核心实例
+                          {{200, 500}, 10.0f, false},
+                          {{600, 800}, 7.8f, false},
+                          {{1000, 800}, 13.6f, false}};
     while (!WindowShouldClose())
     {
         if (!ship.life)
@@ -72,47 +151,53 @@ int main()
             frametime = 0.125f;
         }
         adding += frametime;
-        while(adding>=FIXED_DT){
-            bool holding=IsMouseButtonDown(MOUSE_BUTTON_LEFT) && ship.fuel > 0;
-            if(holding){
-                auto nearest=nearestplanet(ship,planets);
-                if(!nearest) break;
-                float dx=nearest->pos.x-ship.pos.x;
-                float dy=nearest->pos.y-ship.pos.y;
-                float r=max(dist(dx,dy),R_MIN);
+        while (adding >= FIXED_DT)
+        {
+            bool holding = IsMouseButtonDown(MOUSE_BUTTON_LEFT) && ship.fuel > 0;
+            if (holding)
+            {
+                auto nearest = findnearestplanet(ship, planets);
+                if (!nearest)
+                    break;
+                float dx = nearest->pos.x - ship.pos.x;
+                float dy = nearest->pos.y - ship.pos.y;
+                float r = max(dist(dx, dy), R_MIN);
                 float a = G * nearest->mass / (r * r);
                 ship.vel.x += (dx / r) * a * FIXED_DT;
-                ship.vel.y +=(dy/r)*a*FIXED_DT;
+                ship.vel.y += (dy / r) * a * FIXED_DT;
                 // 限速：按速度模长缩放
-                float sp = sqrt(ship.vel.x*ship.vel.x + ship.vel.y*ship.vel.y);
-                if (sp > V_MAX){ ship.vel.x *= V_MAX/sp; ship.vel.y *= V_MAX/sp; }
+                float sp = sqrt(ship.vel.x * ship.vel.x + ship.vel.y * ship.vel.y);
+                if (sp > V_MAX)
+                {
+                    ship.vel.x *= V_MAX / sp;
+                    ship.vel.y *= V_MAX / sp;
+                }
                 ship.fuel = max(ship.fuel - FUEL_LOW_OF_TICK, 0.0f);
             }
             ship.pos.x += ship.vel.x * FIXED_DT;
             ship.pos.y += ship.vel.y * FIXED_DT;
             adding -= FIXED_DT;
         }
-        auto nearest = nearestplanet(ship, planets);
-        if (!nearest)
-            continue;
-        float dx = nearest->pos.x - ship.pos.x;
-        float dy = nearest->pos.y - ship.pos.y;
-        float r = dist(dx, dy);
-        if(r<nearest->radius||ship.fuel<=0) makeshipdie(ship);
-        BeginDrawing();
-        ClearBackground(BLACK);
-        for (auto &p : planets)
+
+        auto nearestplanet = findnearestplanet(ship, planets);
+        if (nearestplanet)
         {
-            DrawCircle(p.pos.x, p.pos.y, p.radius, p.color);
+            float rforplanet = dist(nearestplanet->pos.x - ship.pos.x, nearestplanet->pos.y - ship.pos.y);
+            if (rforplanet < nearestplanet->radius + ship.radius || ship.fuel <= 0)
+                makeshipdie(ship);
         }
-        DrawCircleLinesV(ship.pos,ship.radius,ship.color);
+
+        auto nearestcore = findnearestcore(ship, cores);
+        if (nearestcore)
+        {
+            float rforcore = dist(nearestcore->pos.x - ship.pos.x, nearestcore->pos.y - ship.pos.y);
+            if (rforcore < nearestcore->size + ship.radius)
+                nearestcore->iscollect = true;
+        }
+        BeginDrawing();
+        RenderGame(ship, planets, cores, nearestplanet);
         EndDrawing();
     }
     CloseWindow();
     return 0;
-}
-
-// makeshipdie：标记飞船死亡，主循环检测到 life=false 会退出
-void makeshipdie(Ship& ship){
-    ship.life = false;
 }
