@@ -17,9 +17,9 @@ struct Planet
 // 核心类
 struct Core
 {
-    Vector2 pos;
-    float size;
-    bool iscollect;
+    Vector2 pos;    // 核心位置
+    float radius;   // 核心大小
+    bool iscollect; // 是否收集
 };
 
 // 飞船类
@@ -31,6 +31,13 @@ struct Ship
     bool life;                  // 是否存活
     const float radius = 10.0f; // 固定半径
     const Color color = GREEN;  // 固定颜色
+};
+
+// 出口类
+struct Exit
+{
+    Vector2 pos;
+    float size;
 };
 
 const float G = 900.0f;
@@ -87,7 +94,7 @@ inline float dist(float dx, float dy) { return sqrt(dx * dx + dy * dy); }
 // ================= 核心渲染函数 =================
 // 绘制一帧：星球、能量核心、引力圈/线、飞船、油量条、核心进度
 void RenderGame(const Ship &ship, const vector<Planet> &planets,
-                const vector<Core> &cores, const Planet *nearest)
+                const vector<Core> &cores, const Planet *nearest,Exit exit)
 {
     ClearBackground({10, 10, 25, 255});
 
@@ -100,8 +107,8 @@ void RenderGame(const Ship &ship, const vector<Planet> &planets,
     {
         if (c.iscollect)
             continue;
-        DrawCircleLinesV(c.pos, c.size + 4, Fade(GOLD, 0.5f));
-        DrawCircleV(c.pos, c.size, GOLD);
+        DrawCircleLinesV(c.pos, c.radius + 4, Fade(GOLD, 0.5f));
+        DrawCircleV(c.pos, c.radius, GOLD);
     }
 
     // 3. 引力圈 + 引力线（按住左键且仍有燃料时）
@@ -124,6 +131,20 @@ void RenderGame(const Ship &ship, const vector<Planet> &planets,
         if (c.iscollect)
             collected++;
     DrawText(TextFormat("Core %d / %d", collected, total), 10, 30, 20, LIGHTGRAY);
+
+    // 7. 出口
+    {
+        Vector2 v[4] = {
+            {exit.pos.x, exit.pos.y},
+            {exit.pos.x + exit.size, exit.pos.y},
+            {exit.pos.x + exit.size, exit.pos.y + exit.size},
+            {exit.pos.x, exit.pos.y + exit.size}
+        };
+        for (int i = 0; i < 4; i++)
+        {
+            DrawLineEx(v[i], v[(i + 1) % 4], 5, GREEN);
+        }
+    }
 }
 // =================================================
 
@@ -133,6 +154,7 @@ int main()
     InitWindow(1200, 1000, "Gravity-Well 引力井");
     SetTargetFPS(120);
     Ship ship = {{50, 50}, {10, 10}, FUEL_MAX, true}; // 飞船实例
+    Exit exit = {{1200-30, 1000-30}, 30.0f};                 // 出口实例
     vector<Planet> planets = {                        // 星球实例
                               {{300, 400}, 1.0f, 50.0f, GRAY},
                               {{500, 150}, 1.3f, 50.6f, GREEN},
@@ -191,11 +213,11 @@ int main()
         if (nearestcore)
         {
             float rforcore = dist(nearestcore->pos.x - ship.pos.x, nearestcore->pos.y - ship.pos.y);
-            if (rforcore < nearestcore->size + ship.radius)
+            if (rforcore < nearestcore->radius + ship.radius)
                 nearestcore->iscollect = true;
         }
         BeginDrawing();
-        RenderGame(ship, planets, cores, nearestplanet);
+        RenderGame(ship, planets, cores, nearestplanet,exit);
         EndDrawing();
     }
     CloseWindow();
