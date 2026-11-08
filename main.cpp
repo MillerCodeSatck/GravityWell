@@ -2,6 +2,9 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 using namespace std;
 
@@ -17,9 +20,9 @@ struct Planet
 // 核心类
 struct Core
 {
-    Vector2 pos;    // 核心位置
-    float radius;   // 核心大小
-    bool iscollect; // 是否收集
+    Vector2 pos;            // 核心位置
+    float radius;           // 核心大小
+    bool iscollect = false; // 是否收集
 };
 
 // 飞船类
@@ -28,7 +31,7 @@ struct Ship
     Vector2 pos;                // 目前位置
     Vector2 vel;                // 目前速度
     float fuel;                 // 目前油量
-    bool life;                  // 是否存活
+    bool life = true;           // 是否存活
     const float radius = 10.0f; // 固定半径
     const Color color = GREEN;  // 固定颜色
 };
@@ -40,12 +43,55 @@ struct Exit
     float size;
 };
 
-const float G = 900.0f;
-const float R_MIN = 100.0f; // 防止引力爆炸的最小距离
-const float V_MAX = 400.0f;
+const float G = 10000.0f;
+const float R_MIN = 0.0f; // 防止引力爆炸的最小距离
+const float V_MAX = 800.0f;
 const float FUEL_MAX = 100.0f;
 const float FIXED_DT = 1.0f / 120.0f;
 const float FUEL_LOW_OF_TICK = 0.2f;
+
+// 读取level信息
+void readlevel(int level, Ship &ship, vector<Planet> &planets, vector<Core> &cores, Exit &exit)
+{
+    planets.clear();
+    cores.clear();
+    ifstream levelfile("assets\\levels\\level" + to_string(level) + ".txt");
+    if (!levelfile.is_open())
+    {
+        // 报错 / cerr
+        return;
+    }
+    string line;
+    while (getline(levelfile, line))
+    {
+        istringstream iline(line);
+        string mode;
+        iline >> mode;
+        if (mode == "ship")
+        {
+            iline >> ship.pos.x >> ship.pos.y >> ship.vel.x >> ship.vel.y >> ship.fuel;
+        }
+        else if (mode == "planet")
+        {
+            Planet p;
+            int r, g, b, a;
+            iline >> p.pos.x >> p.pos.y >> p.mass >> p.radius >> r >> g >> b >> a;
+            p.color = {(unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a};
+            planets.push_back(p);
+        }
+        else if (mode == "core")
+        {
+            Core c;
+            iline >> c.pos.x >> c.pos.y >> c.radius;
+            cores.push_back(c);
+        }
+        else if (mode == "exit")
+        {
+            iline >> exit.pos.x >> exit.pos.y >> exit.size;
+        }
+    }
+    levelfile.close();
+}
 
 // makeshipdie：标记飞船死亡，主循环检测到 life=false 会退出
 void makeshipdie(Ship &ship)
@@ -94,7 +140,7 @@ inline float dist(float dx, float dy) { return sqrt(dx * dx + dy * dy); }
 // ================= 核心渲染函数 =================
 // 绘制一帧：星球、能量核心、引力圈/线、飞船、油量条、核心进度
 void RenderGame(const Ship &ship, const vector<Planet> &planets,
-                const vector<Core> &cores, const Planet *nearest,Exit exit)
+                const vector<Core> &cores, const Planet *nearest, Exit exit)
 {
     ClearBackground({10, 10, 25, 255});
 
@@ -138,8 +184,7 @@ void RenderGame(const Ship &ship, const vector<Planet> &planets,
             {exit.pos.x, exit.pos.y},
             {exit.pos.x + exit.size, exit.pos.y},
             {exit.pos.x + exit.size, exit.pos.y + exit.size},
-            {exit.pos.x, exit.pos.y + exit.size}
-        };
+            {exit.pos.x, exit.pos.y + exit.size}};
         for (int i = 0; i < 4; i++)
         {
             DrawLineEx(v[i], v[(i + 1) % 4], 5, GREEN);
@@ -151,10 +196,10 @@ void RenderGame(const Ship &ship, const vector<Planet> &planets,
 float adding = 0.0f;
 int main()
 {
-    InitWindow(1200, 1000, "Gravity-Well 引力井");
+    InitWindow(1500, 1500, "Gravity-Well 引力井");
     SetTargetFPS(120);
     Ship ship = {{50, 50}, {10, 10}, FUEL_MAX, true}; // 飞船实例
-    Exit exit = {{1200-30, 1000-30}, 30.0f};                 // 出口实例
+    Exit exit = {{1200 - 30, 1000 - 30}, 30.0f};      // 出口实例
     vector<Planet> planets = {                        // 星球实例
                               {{300, 400}, 1.0f, 50.0f, GRAY},
                               {{500, 150}, 1.3f, 50.6f, GREEN},
@@ -205,7 +250,7 @@ int main()
         if (nearestplanet)
         {
             float rforplanet = dist(nearestplanet->pos.x - ship.pos.x, nearestplanet->pos.y - ship.pos.y);
-            if (rforplanet < nearestplanet->radius + ship.radius || ship.fuel <= 0)
+            if (rforplanet < nearestplanet->radius + ship.radius)
                 makeshipdie(ship);
         }
 
@@ -217,7 +262,7 @@ int main()
                 nearestcore->iscollect = true;
         }
         BeginDrawing();
-        RenderGame(ship, planets, cores, nearestplanet,exit);
+        RenderGame(ship, planets, cores, nearestplanet, exit);
         EndDrawing();
     }
     CloseWindow();
