@@ -51,18 +51,18 @@ const float FIXED_DT = 1.0f / 120.0f;
 const float FUEL_LOW_OF_TICK = 0.2f;
 
 // 读取level信息
-void readlevel(int level, Ship &ship, vector<Planet> &planets, vector<Core> &cores, Exit &exit)
+void readleveldata(int level, Ship &ship, vector<Planet> &planets, vector<Core> &cores, Exit &exit)
 {
     planets.clear();
     cores.clear();
-    ifstream levelfile("assets\\levels\\level" + to_string(level) + ".txt");
-    if (!levelfile.is_open())
+    ifstream leveldatafile("assets\\levels\\level" + to_string(level) + ".txt");
+    if (!leveldatafile.is_open())
     {
-        // 报错 / cerr
+        TraceLog(LOG_WARNING, "没有文件%s", "assets\\levels\\level" + to_string(level) + ".txt");
         return;
     }
     string line;
-    while (getline(levelfile, line))
+    while (getline(leveldatafile, line))
     {
         istringstream iline(line);
         string mode;
@@ -90,13 +90,39 @@ void readlevel(int level, Ship &ship, vector<Planet> &planets, vector<Core> &cor
             iline >> exit.pos.x >> exit.pos.y >> exit.size;
         }
     }
-    levelfile.close();
+    leveldatafile.close();
 }
 
-// makeshipdie：标记飞船死亡，主循环检测到 life=false 会退出
-void makeshipdie(Ship &ship)
+// 关卡总数统计
+int countlevels()
 {
-    ship.life = false;
+    int count = 0;
+    while (true)
+    {
+        ifstream f("assets\\levels\\level" + to_string(count + 1) + ".txt");
+        if (!f.is_open())
+            break;
+        f.close();
+        count++;
+    }
+    return count;
+}
+
+// 加载关卡
+int readlevel()
+{
+    ifstream levelfile("assets\\save.txt");
+    int level = 1;
+    if (levelfile.is_open())
+        levelfile >> level;
+    return level;
+}
+
+// 保存关卡
+void savelevel(int level)
+{
+    ofstream levelfile("assets\\save.txt");
+    levelfile << level;
 }
 
 // 找离飞船最近的星球
@@ -138,9 +164,9 @@ Core *findnearestcore(const Ship &ship, vector<Core> &cores)
 inline float dist(float dx, float dy) { return sqrt(dx * dx + dy * dy); }
 
 // ================= 核心渲染函数 =================
-// 绘制一帧：星球、能量核心、引力圈/线、飞船、油量条、核心进度
+// 绘制一帧：星球、能量核心、引力圈/线、飞船、油量条、核心进度、出口、关卡
 void RenderGame(const Ship &ship, const vector<Planet> &planets,
-                const vector<Core> &cores, const Planet *nearest, Exit exit)
+                const vector<Core> &cores, const Planet *nearest, Exit exit, int level)
 {
     ClearBackground({10, 10, 25, 255});
 
@@ -179,35 +205,32 @@ void RenderGame(const Ship &ship, const vector<Planet> &planets,
     DrawText(TextFormat("Core %d / %d", collected, total), 10, 30, 20, LIGHTGRAY);
 
     // 7. 出口
+    Vector2 v[4] = {
+        {exit.pos.x, exit.pos.y},
+        {exit.pos.x + exit.size, exit.pos.y},
+        {exit.pos.x + exit.size, exit.pos.y + exit.size},
+        {exit.pos.x, exit.pos.y + exit.size}};
+    for (int i = 0; i < 4; i++)
     {
-        Vector2 v[4] = {
-            {exit.pos.x, exit.pos.y},
-            {exit.pos.x + exit.size, exit.pos.y},
-            {exit.pos.x + exit.size, exit.pos.y + exit.size},
-            {exit.pos.x, exit.pos.y + exit.size}};
-        for (int i = 0; i < 4; i++)
-        {
-            DrawLineEx(v[i], v[(i + 1) % 4], 5, GREEN);
-        }
+        DrawLineEx(v[i], v[(i + 1) % 4], 5, GREEN);
     }
+
+    // 8. 关卡进度
+    DrawText(TextFormat("Level %d", level), 10, 50, 25, LIGHTGRAY);
 }
 // =================================================
 
 float adding = 0.0f;
+int level = readlevel();
 int main()
 {
-    InitWindow(1500, 1500, "Gravity-Well 引力井");
+    InitWindow(1400, 1100, "Gravity-Well 引力井");
     SetTargetFPS(120);
-    Ship ship = {{50, 50}, {10, 10}, FUEL_MAX, true}; // 飞船实例
-    Exit exit = {{1200 - 30, 1000 - 30}, 30.0f};      // 出口实例
-    vector<Planet> planets = {                        // 星球实例
-                              {{300, 400}, 1.0f, 50.0f, GRAY},
-                              {{500, 150}, 1.3f, 50.6f, GREEN},
-                              {{900, 500}, 0.79f, 48.5f, ORANGE}};
-    vector<Core> cores = {// 核心实例
-                          {{200, 500}, 10.0f, false},
-                          {{600, 800}, 7.8f, false},
-                          {{1000, 800}, 13.6f, false}};
+    Ship ship;              // 飞船实例
+    Exit exit;              // 出口实例
+    vector<Planet> planets; // 星球实例
+    vector<Core> cores;     // 核心实例
+    readleveldata(level, ship, planets, cores, exit);
     while (!WindowShouldClose())
     {
         if (!ship.life)
@@ -224,22 +247,23 @@ int main()
             if (holding)
             {
                 auto nearest = findnearestplanet(ship, planets);
-                if (!nearest)
-                    break;
-                float dx = nearest->pos.x - ship.pos.x;
-                float dy = nearest->pos.y - ship.pos.y;
-                float r = max(dist(dx, dy), R_MIN);
-                float a = G * nearest->mass / (r * r);
-                ship.vel.x += (dx / r) * a * FIXED_DT;
-                ship.vel.y += (dy / r) * a * FIXED_DT;
-                // 限速：按速度模长缩放
-                float sp = sqrt(ship.vel.x * ship.vel.x + ship.vel.y * ship.vel.y);
-                if (sp > V_MAX)
+                if (nearest) // 空指针保护：没有星球就不施力
                 {
-                    ship.vel.x *= V_MAX / sp;
-                    ship.vel.y *= V_MAX / sp;
+                    float dx = nearest->pos.x - ship.pos.x;
+                    float dy = nearest->pos.y - ship.pos.y;
+                    float r = max(dist(dx, dy), R_MIN);
+                    float a = G * nearest->mass / (r * r);
+                    ship.vel.x += (dx / r) * a * FIXED_DT;
+                    ship.vel.y += (dy / r) * a * FIXED_DT;
+                    ship.fuel = max(ship.fuel - FUEL_LOW_OF_TICK, 0.0f);
                 }
-                ship.fuel = max(ship.fuel - FUEL_LOW_OF_TICK, 0.0f);
+            }
+            // 限速：按速度模长缩放
+            float sp = sqrt(ship.vel.x * ship.vel.x + ship.vel.y * ship.vel.y);
+            if (sp > V_MAX)
+            {
+                ship.vel.x *= V_MAX / sp;
+                ship.vel.y *= V_MAX / sp;
             }
             ship.pos.x += ship.vel.x * FIXED_DT;
             ship.pos.y += ship.vel.y * FIXED_DT;
@@ -251,7 +275,7 @@ int main()
         {
             float rforplanet = dist(nearestplanet->pos.x - ship.pos.x, nearestplanet->pos.y - ship.pos.y);
             if (rforplanet < nearestplanet->radius + ship.radius)
-                makeshipdie(ship);
+                readleveldata(level, ship, planets, cores, exit);
         }
 
         auto nearestcore = findnearestcore(ship, cores);
@@ -261,8 +285,20 @@ int main()
             if (rforcore < nearestcore->radius + ship.radius)
                 nearestcore->iscollect = true;
         }
+
+        int total = (int)cores.size(), collected = 0;
+        for (const auto &c : cores)
+            if (c.iscollect)
+                collected++;
+        float rforexit = dist(exit.pos.x - ship.pos.x, exit.pos.y - ship.pos.y);
+        if (rforexit < exit.size * 0.6f && collected == cores.size())
+        {
+            level++;
+            savelevel(level);
+            readleveldata(level, ship, planets, cores, exit);
+        }
         BeginDrawing();
-        RenderGame(ship, planets, cores, nearestplanet, exit);
+        RenderGame(ship, planets, cores, nearestplanet, exit, level);
         EndDrawing();
     }
     CloseWindow();
